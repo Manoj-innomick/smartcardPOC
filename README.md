@@ -1,44 +1,65 @@
-Smart Card Integration in React Native
-This README provides a comprehensive guide to integrating the javax.smartcardio SDK into a React Native CLI project. The goal is to enable the app to communicate with USB smart card readers dynamically, supporting all compatible devices (e.g., CIR115, CIR125, CIR135, CIR215, CIR315, CIR415, CIR515, CIR615) using the AB Circle Smart Card I/O Android Library.
+Smart Card Reader Integration for React Native
+
+This project demonstrates how to integrate the AB Circle Smart Card I/O Android Library into a React Native CLI application to communicate with USB smart card readers (CIR115, CIR125, CIR135, CIR215, CIR315, CIR415, CIR515, CIR615). The app dynamically detects connected readers, requests USB permissions, and reads card data, with a modern, user-friendly interface.
+📋 Table of Contents
 
 Prerequisites
-Before you begin, ensure you have the following tools and dependencies installed:
-
-Node.js: Version 16 or higher
-JDK: Version 11 or higher
-Android SDK: Configured via Android Studio or command line
-React Native CLI: Install globally with npm install -g @react-native-community/cli
-Physical Android Device: Must support USB Host mode and have a compatible smart card reader attached
-JAR Files: smartcardio-x.y.z.jar and abcTerminalFactory-x.y.z.jar (replace x.y.z with the actual version from the AB Circle SDK distribution)
-
-
+Setup Instructions
 Step 1: Create a New React Native Project
-Start by creating a new React Native project using the CLI:
+Step 2: Add JAR Files
+Step 3: Configure Android Permissions
+Step 4: Create the Native Module
+Step 5: Update the React Native Frontend
+Step 6: Configure ProGuard Rules
+Step 7: Build and Test
+
+
+File Structure
+Troubleshooting
+Contributing
+License
+
+📋 Prerequisites
+Before starting, ensure you have the following:
+
+Node.js: v16 or higher
+JDK: v11 or higher
+Android SDK: Configured via Android Studio (Chipmunk 2021.2.1+ recommended)
+React Native CLI: Install with npm install -g @react-native-community/cli
+Physical Android Device: Must support USB Host mode with a compatible smart card reader
+JAR Files: smartcardio-1.1.0.jar and abcTerminalFactory-1.4.8.jar from the AB Circle SDK
+USB Smart Card Reader: One of CIR115, CIR125, CIR135, CIR215, CIR315, CIR415, CIR515, CIR615
+
+🛠️ Setup Instructions
+Follow these steps to set up a new React Native project with smart card reader support.
+Step 1: Create a New React Native Project
+Initialize a new project using the React Native CLI:
 npx @react-native-community/cli init SmartCardApp
 cd SmartCardApp
 
-This command initializes a project named SmartCardApp with the default structure.
+This creates a project named SmartCardApp with a default structure.
+Step 2: Add JAR Files
+The AB Circle library requires external JAR files for javax.smartcardio and terminal factory support.
 
-Step 2: Add JAR Files to the Project
-The AB Circle Smart Card I/O Android Library relies on external JAR files since javax.smartcardio is not natively available in Android's runtime.
+Obtain JAR Files:
 
-Obtain the JAR Files:
-
-Download smartcardio-x.y.z.jar and abcTerminalFactory-x.y.z.jar from the AB Circle SDK provider.
+Acquire smartcardio-1.1.0.jar and abcTerminalFactory-1.4.8.jar from the AB Circle SDK provider.
 
 
 Place JAR Files:
 
 Navigate to android/app/.
-Create a libs folder if it doesn’t exist: mkdir libs.
+Create a libs folder: mkdir android/app/libs.
 Copy both JAR files into android/app/libs/.
 
 
 Update build.gradle:
 
-Open android/app/build.gradle and add the following to the dependencies block:dependencies {
+Open android/app/build.gradle and add the JAR files to the dependencies block:
+dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
-    // Existing dependencies remain unchanged
+    implementation 'com.facebook.react:react-native:+'
+    implementation 'com.BV:LinearGradient:2.5.2'
 }
 
 
@@ -46,7 +67,8 @@ Open android/app/build.gradle and add the following to the dependencies block:de
 
 Sync the Project:
 
-Run the following commands to clean and sync:cd android
+Run:
+cd android
 ./gradlew clean
 cd ..
 
@@ -54,47 +76,51 @@ cd ..
 
 
 
-
 Step 3: Configure Android Permissions
-Modify the AndroidManifest.xml to include permissions and features for USB communication.
+Add USB permissions and intent filters to the Android manifest.
 
-Open android/app/src/main/AndroidManifest.xml and update it as follows:
+Open android/app/src/main/AndroidManifest.xml and update it:
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
   <uses-permission android:name="android.permission.USB_PERMISSION" />
   <uses-feature android:name="android.hardware.usb.host" android:required="true" />
   <application
     android:allowBackup="true"
     android:label="@string/app_name"
-    android:icon="@mipmap/ic_launcher">
+    android:icon="@mipmap/ic_launcher"
+    android:roundIcon="@mipmap/ic_launcher_round"
+    android:supportsRtl="true"
+    android:theme="@style/AppTheme">
     <activity
       android:name=".MainActivity"
       android:label="@string/app_name"
-      android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode"
-      android:launchMode="singleTask">
+      android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize|uiMode"
+      android:launchMode="singleTask"
+      android:windowSoftInputMode="adjustResize"
+      android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />
       </intent-filter>
       <intent-filter>
         <action android:name="com.smartcardapp.USB_PERMISSION" />
+        <category android:name="android.intent.category.DEFAULT" />
       </intent-filter>
     </activity>
   </application>
 </manifest>
 
 
-Note: Replace com.smartcardapp with your actual package name if it differs (check android/app/src/main/java/com/ for your package).
-
+Note: Ensure the package name (com.smartcardapp) matches your project’s package in android/app/src/main/java/com/.
 
 
 Step 4: Create the Native Module
-Create a Kotlin native module to interface with the smart card readers.
+Create a Kotlin native module to interface with smart card readers, using coroutines to prevent main thread blocking.
 
 Create SmartCardModule.kt:
 
 Navigate to android/app/src/main/java/com/smartcardapp/.
 
-Create a file named SmartCardModule.kt with the following content:
+Create SmartCardModule.kt:
 package com.smartcardapp
 
 import android.content.Context
@@ -152,16 +178,20 @@ class SmartCardModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
 
     @ReactMethod
     fun requestUsbPermission(deviceName: String, promise: Promise) {
-        val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
-        val device = usbManager.deviceList.values.find { it.deviceName == deviceName }
-        if (device == null) {
-            promise.reject("NO_DEVICE", "USB device not found")
-            return
+        try {
+            val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
+            val device = usbManager.deviceList.values.find { it.deviceName == deviceName }
+            if (device == null) {
+                promise.reject("NO_DEVICE", "USB device not found")
+                return
+            }
+            val intent = Intent("com.smartcardapp.USB_PERMISSION")
+            val pendingIntent = PendingIntent.getBroadcast(reactContext, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+            usbManager.requestPermission(device, pendingIntent)
+            promise.resolve("Permission requested")
+        } catch (e: Exception) {
+            promise.reject("PERMISSION_ERROR", "Failed to request USB permission: ${e.message}")
         }
-        val intent = Intent("com.smartcardapp.USB_PERMISSION")
-        val pendingIntent = PendingIntent.getBroadcast(reactContext, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-        usbManager.requestPermission(device, pendingIntent)
-        promise.resolve("Permission requested")
     }
 
     @ReactMethod
@@ -234,25 +264,53 @@ class SmartCardPackage : ReactPackage {
 
 Update MainApplication.kt:
 
-Open android/app/src/main/java/com/smartcardapp/MainApplication.kt and modify the getPackages() method:import com.smartcardapp.SmartCardPackage
+Open android/app/src/main/java/com/smartcardapp/MainApplication.kt and add SmartCardPackage:
+package com.smartcardapp
 
-// ...
+import android.app.Application
+import com.facebook.react.PackageList
+import com.facebook.react.ReactApplication
+import com.facebook.react.ReactHost
+import com.facebook.react.ReactNativeHost
+import com.facebook.react.ReactPackage
+import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
+import com.facebook.react.defaults.DefaultReactNativeHost
+import com.facebook.soloader.SoLoader
 
-override fun getPackages(): List<ReactPackage> {
-    val packages = PackageList(this).packages
-    packages.add(SmartCardPackage())
-    return packages
+class MainApplication : Application(), ReactApplication {
+
+  override val reactNativeHost: ReactNativeHost =
+      object : DefaultReactNativeHost(this) {
+        override fun getPackages(): List<ReactPackage> =
+            PackageList(this).packages.apply {
+                add(SmartCardPackage())
+            }
+
+        override fun getJSMainModuleName(): String = "index"
+
+        override fun getUseDeveloperSupport(): Boolean = BuildConfig.DEBUG
+
+        override val isNewArchEnabled: Boolean = BuildConfig.IS_NEW_ARCHITECTURE_ENABLED
+        override val isHermesEnabled: Boolean = BuildConfig.IS_HERMES_ENABLED
+    }
+
+  override val reactHost: ReactHost
+    get() = getDefaultReactHost(applicationContext, reactNativeHost)
+
+  override fun onCreate() {
+    super.onCreate()
+    SoLoader.init(this, false)
+  }
 }
 
 
 
 
 
+Step 5: Update the React Native Frontend
+Modify the app’s frontend to interact with the native module, displaying card data with a futuristic UI.
 
-Step 5: Update TypeScript Code
-Modify the App.tsx file to interact with the native module.
-
-Open SmartCardApp/App.tsx and replace its content with:
+Open App.tsx and replace its content:
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
@@ -386,14 +444,17 @@ export default App;
 
 Install Dependencies:
 
-Run npm install react-native-linear-gradient to add the gradient component.
-Link it (if required, depending on your React Native version): npx react-native link react-native-linear-gradient.
+Install react-native-linear-gradient:npm install react-native-linear-gradient
+
+
+Link (if React Native < 0.60):npx react-native link react-native-linear-gradient
+
 
 
 
 
 Step 6: Configure ProGuard Rules
-Ensure the native module and smart card classes are preserved in release builds.
+Prevent code stripping in release builds.
 
 Open android/app/proguard-rules.pro and add:
 # Preserve SmartCardModule and related classes
@@ -405,17 +466,25 @@ Open android/app/proguard-rules.pro and add:
 
 
 
-
 Step 7: Build and Test
+
+Add Coroutines Dependency:
+
+Open android/app/build.gradle and add:dependencies {
+    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.6.4"
+}
+
+
+
 
 Run in Debug Mode:
 
-Connect your Android device and run:npx react-native run-android
+Connect an Android device or emulator:npx react-native run-android
 
 
 
 
-Generate a Release APK:
+Generate Release APK:
 
 Configure signing in android/gradle.properties:MYAPP_RELEASE_STORE_FILE=my-release-key.keystore
 MYAPP_RELEASE_KEY_ALIAS=my-key-alias
@@ -424,7 +493,14 @@ MYAPP_RELEASE_KEY_PASSWORD=yourpassword
 
 
 Update android/app/build.gradle:android {
-    ...
+    compileSdkVersion 33
+    defaultConfig {
+        applicationId "com.smartcardapp"
+        minSdkVersion 21
+        targetSdkVersion 33
+        versionCode 1
+        versionName "1.0"
+    }
     signingConfigs {
         release {
             storeFile file(MYAPP_RELEASE_STORE_FILE)
@@ -445,6 +521,7 @@ Update android/app/build.gradle:android {
 
 Build the release APK:cd android
 ./gradlew assembleRelease
+cd ..
 
 
 
@@ -454,10 +531,73 @@ Install and Test:
 Install the APK:adb install android/app/build/outputs/apk/release/app-release.apk
 
 
-Test with a supported USB smart card reader and a smart card inserted.
+Test with a supported smart card reader (e.g., CIR115) and a smart card inserted.
+Check logs for debugging:adb logcat *:S ReactNative:V ReactNativeJS:V
 
 
 
 
-Conclusion
-By following these steps, you’ve successfully integrated the javax.smartcardio SDK into a React Native CLI project. The app dynamically detects and supports all compatible USB smart card readers, providing a robust solution for smart card operations on Android devices.
+
+📂 File Structure
+SmartCardApp/
+├── android/
+│   ├── app/
+│   │   ├── libs/
+│   │   │   ├── smartcardio-1.1.0.jar
+│   │   │   ├── abcTerminalFactory-1.4.8.jar
+│   │   ├── src/main/
+│   │   │   ├── AndroidManifest.xml
+│   │   │   ├── java/com/smartcardapp/
+│   │   │   │   ├── MainApplication.kt
+│   │   │   │   ├── SmartCardModule.kt
+│   │   │   │   ├── SmartCardPackage.kt
+│   │   ├── build.gradle
+│   │   ├── proguard-rules.pro
+│   ├── gradle.properties
+├── App.tsx
+├── package.json
+
+🔧 Troubleshooting
+
+App Not Responding (ANR):
+
+Ensure readCard and listUsbDevices use Dispatchers.IO to avoid main thread blocking.
+Check logs with adb logcat for blocking operations.
+
+
+Module Not Found:
+
+Verify SmartCardPackage is added to MainApplication.kt.
+Clear caches:cd android
+./gradlew clean
+cd ..
+npx react-native start --reset-cache
+
+
+
+
+Build Errors:
+
+Ensure JAR files are in android/app/libs/.
+Sync Gradle: ./gradlew sync.
+
+
+USB Device Not Detected:
+
+Confirm the device supports USB Host mode.
+Use a supported reader (CIR115, CIR125, etc.).
+Check logs for NO_DEVICES errors.
+
+
+
+🤝 Contributing
+Contributions are welcome! Please:
+
+Fork the repository.
+Create a feature branch (git checkout -b feature/YourFeature).
+Commit changes (git commit -m 'Add YourFeature').
+Push to the branch (git push origin feature/YourFeature).
+Open a pull request.
+
+📜 License
+This project is licensed under the MIT License - see the LICENSE file for details.
