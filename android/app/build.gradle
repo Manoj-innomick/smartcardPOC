@@ -92,25 +92,36 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+        if (project.hasProperty('MYAPP_UPLOAD_STORE_FILE')) {
+            storeFile file(MYAPP_UPLOAD_STORE_FILE)
+            storePassword MYAPP_UPLOAD_STORE_PASSWORD
+            keyAlias MYAPP_UPLOAD_KEY_ALIAS
+            keyPassword MYAPP_UPLOAD_KEY_PASSWORD
+        }
+    }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
-            minifyEnabled enableProguardInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-        }
+            debuggable true  // Add this temporarily
+        signingConfig signingConfigs.release
+        shrinkResources true
+        minifyEnabled true
+        proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+    }
     }
 }
 
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-
+  implementation files('libs/smartcardio-1.1.0.jar')
+    implementation files('libs/abcTerminalFactory-1.4.8-release.jar')
+    implementation 'androidx.core:core:1.12.0'
+    implementation "com.facebook.react:react-native:+"
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {

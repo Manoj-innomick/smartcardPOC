@@ -1,97 +1,463 @@
-This is a new [**React Native**](https://reactnative.dev) project, bootstrapped using [`@react-native-community/cli`](https://github.com/react-native-community/cli).
+Smart Card Integration in React Native
+This README provides a comprehensive guide to integrating the javax.smartcardio SDK into a React Native CLI project. The goal is to enable the app to communicate with USB smart card readers dynamically, supporting all compatible devices (e.g., CIR115, CIR125, CIR135, CIR215, CIR315, CIR415, CIR515, CIR615) using the AB Circle Smart Card I/O Android Library.
 
-# Getting Started
+Prerequisites
+Before you begin, ensure you have the following tools and dependencies installed:
 
-> **Note**: Make sure you have completed the [Set Up Your Environment](https://reactnative.dev/docs/set-up-your-environment) guide before proceeding.
+Node.js: Version 16 or higher
+JDK: Version 11 or higher
+Android SDK: Configured via Android Studio or command line
+React Native CLI: Install globally with npm install -g @react-native-community/cli
+Physical Android Device: Must support USB Host mode and have a compatible smart card reader attached
+JAR Files: smartcardio-x.y.z.jar and abcTerminalFactory-x.y.z.jar (replace x.y.z with the actual version from the AB Circle SDK distribution)
 
-## Step 1: Start Metro
 
-First, you will need to run **Metro**, the JavaScript build tool for React Native.
+Step 1: Create a New React Native Project
+Start by creating a new React Native project using the CLI:
+npx @react-native-community/cli init SmartCardApp
+cd SmartCardApp
 
-To start the Metro dev server, run the following command from the root of your React Native project:
+This command initializes a project named SmartCardApp with the default structure.
 
-```sh
-# Using npm
-npm start
+Step 2: Add JAR Files to the Project
+The AB Circle Smart Card I/O Android Library relies on external JAR files since javax.smartcardio is not natively available in Android's runtime.
 
-# OR using Yarn
-yarn start
-```
+Obtain the JAR Files:
 
-## Step 2: Build and run your app
+Download smartcardio-x.y.z.jar and abcTerminalFactory-x.y.z.jar from the AB Circle SDK provider.
 
-With Metro running, open a new terminal window/pane from the root of your React Native project, and use one of the following commands to build and run your Android or iOS app:
 
-### Android
+Place JAR Files:
 
-```sh
-# Using npm
-npm run android
+Navigate to android/app/.
+Create a libs folder if it doesn’t exist: mkdir libs.
+Copy both JAR files into android/app/libs/.
 
-# OR using Yarn
-yarn android
-```
 
-### iOS
+Update build.gradle:
 
-For iOS, remember to install CocoaPods dependencies (this only needs to be run on first clone or after updating native deps).
+Open android/app/build.gradle and add the following to the dependencies block:dependencies {
+    implementation fileTree(dir: 'libs', include: ['*.jar'])
+    // Existing dependencies remain unchanged
+}
 
-The first time you create a new project, run the Ruby bundler to install CocoaPods itself:
 
-```sh
-bundle install
-```
 
-Then, and every time you update your native dependencies, run:
 
-```sh
-bundle exec pod install
-```
+Sync the Project:
 
-For more information, please visit [CocoaPods Getting Started guide](https://guides.cocoapods.org/using/getting-started.html).
+Run the following commands to clean and sync:cd android
+./gradlew clean
+cd ..
 
-```sh
-# Using npm
-npm run ios
 
-# OR using Yarn
-yarn ios
-```
 
-If everything is set up correctly, you should see your new app running in the Android Emulator, iOS Simulator, or your connected device.
 
-This is one way to run your app — you can also build it directly from Android Studio or Xcode.
 
-## Step 3: Modify your app
 
-Now that you have successfully run the app, let's make changes!
+Step 3: Configure Android Permissions
+Modify the AndroidManifest.xml to include permissions and features for USB communication.
 
-Open `App.tsx` in your text editor of choice and make some changes. When you save, your app will automatically update and reflect these changes — this is powered by [Fast Refresh](https://reactnative.dev/docs/fast-refresh).
+Open android/app/src/main/AndroidManifest.xml and update it as follows:
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <uses-permission android:name="android.permission.USB_PERMISSION" />
+  <uses-feature android:name="android.hardware.usb.host" android:required="true" />
+  <application
+    android:allowBackup="true"
+    android:label="@string/app_name"
+    android:icon="@mipmap/ic_launcher">
+    <activity
+      android:name=".MainActivity"
+      android:label="@string/app_name"
+      android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode"
+      android:launchMode="singleTask">
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN" />
+        <category android:name="android.intent.category.LAUNCHER" />
+      </intent-filter>
+      <intent-filter>
+        <action android:name="com.smartcardapp.USB_PERMISSION" />
+      </intent-filter>
+    </activity>
+  </application>
+</manifest>
 
-When you want to forcefully reload, for example to reset the state of your app, you can perform a full reload:
 
-- **Android**: Press the <kbd>R</kbd> key twice or select **"Reload"** from the **Dev Menu**, accessed via <kbd>Ctrl</kbd> + <kbd>M</kbd> (Windows/Linux) or <kbd>Cmd ⌘</kbd> + <kbd>M</kbd> (macOS).
-- **iOS**: Press <kbd>R</kbd> in iOS Simulator.
+Note: Replace com.smartcardapp with your actual package name if it differs (check android/app/src/main/java/com/ for your package).
 
-## Congratulations! :tada:
 
-You've successfully run and modified your React Native App. :partying_face:
 
-### Now what?
+Step 4: Create the Native Module
+Create a Kotlin native module to interface with the smart card readers.
 
-- If you want to add this new React Native code to an existing application, check out the [Integration guide](https://reactnative.dev/docs/integration-with-existing-apps).
-- If you're curious to learn more about React Native, check out the [docs](https://reactnative.dev/docs/getting-started).
+Create SmartCardModule.kt:
 
-# Troubleshooting
+Navigate to android/app/src/main/java/com/smartcardapp/.
 
-If you're having issues getting the above steps to work, see the [Troubleshooting](https://reactnative.dev/docs/troubleshooting) page.
+Create a file named SmartCardModule.kt with the following content:
+package com.smartcardapp
 
-# Learn More
+import android.content.Context
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbManager
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.bridge.ReactContextBaseJavaModule
+import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.WritableArray
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.bridge.Arguments
+import android.app.PendingIntent
+import android.content.Intent
+import javax.smartcardio.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
-To learn more about React Native, take a look at the following resources:
+class SmartCardModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
+    private val reactContext: ReactApplicationContext = reactContext
 
-- [React Native Website](https://reactnative.dev) - learn more about React Native.
-- [Getting Started](https://reactnative.dev/docs/environment-setup) - an **overview** of React Native and how setup your environment.
-- [Learn the Basics](https://reactnative.dev/docs/getting-started) - a **guided tour** of the React Native **basics**.
-- [Blog](https://reactnative.dev/blog) - read the latest official React Native **Blog** posts.
-- [`@facebook/react-native`](https://github.com/facebook/react-native) - the Open Source; GitHub **repository** for React Native.
+    override fun getName(): String {
+        return "SmartCardModule"
+    }
+
+    @ReactMethod
+    fun readCard(protocol: String, promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val factory = TerminalFactory.getDefault()
+                val terminals = factory.terminals()
+                val terminalList = terminals.list()
+                if (terminalList.isEmpty()) {
+                    promise.reject("NO_TERMINALS", "No card terminals found")
+                    return@launch
+                }
+                val terminal = terminalList[0]
+                if (!terminal.isCardPresent) {
+                    promise.reject("NO_CARD", "No card present in the terminal")
+                    return@launch
+                }
+                val card = terminal.connect(protocol)
+                val channel = card.basicChannel
+                val selectCommand = byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00, 0x00)
+                val command = CommandAPDU(selectCommand)
+                val response = channel.transmit(command)
+                promise.resolve(byteArrayToHex(response.bytes))
+                card.disconnect(true)
+            } catch (e: Exception) {
+                promise.reject("CARD_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun requestUsbPermission(deviceName: String, promise: Promise) {
+        val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
+        val device = usbManager.deviceList.values.find { it.deviceName == deviceName }
+        if (device == null) {
+            promise.reject("NO_DEVICE", "USB device not found")
+            return
+        }
+        val intent = Intent("com.smartcardapp.USB_PERMISSION")
+        val pendingIntent = PendingIntent.getBroadcast(reactContext, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+        usbManager.requestPermission(device, pendingIntent)
+        promise.resolve("Permission requested")
+    }
+
+    @ReactMethod
+    fun listUsbDevices(promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
+                val deviceList = usbManager.deviceList
+                val devices: WritableArray = Arguments.createArray()
+
+                for (device in deviceList.values) {
+                    for (i in 0 until device.interfaceCount) {
+                        if (device.getInterface(i).interfaceClass == 0x0B) {
+                            val deviceInfo: WritableMap = Arguments.createMap()
+                            deviceInfo.putString("deviceName", device.deviceName)
+                            deviceInfo.putInt("vendorId", device.vendorId)
+                            deviceInfo.putInt("productId", device.productId)
+                            devices.pushMap(deviceInfo)
+                            break
+                        }
+                    }
+                }
+
+                if (devices.size() == 0) {
+                    promise.reject("NO_DEVICES", "No smart card readers found")
+                    return@launch
+                }
+                promise.resolve(devices)
+            } catch (e: Exception) {
+                promise.reject("LIST_ERROR", "Failed to list USB devices: ${e.message}")
+            }
+        }
+    }
+
+    @ReactMethod
+    fun debugModule(promise: Promise) {
+        promise.resolve("SmartCardModule is loaded")
+    }
+
+    private fun byteArrayToHex(bytes: ByteArray): String {
+        return bytes.joinToString("") { String.format("%02X", it) }
+    }
+}
+
+
+
+
+Create SmartCardPackage.kt:
+
+In the same directory, create SmartCardPackage.kt:
+package com.smartcardapp
+
+import com.facebook.react.ReactPackage
+import com.facebook.react.bridge.NativeModule
+import com.facebook.react.bridge.ReactApplicationContext
+import com.facebook.react.uimanager.ViewManager
+
+class SmartCardPackage : ReactPackage {
+    override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> {
+        return listOf(SmartCardModule(reactContext))
+    }
+
+    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
+        return emptyList()
+    }
+}
+
+
+
+
+Update MainApplication.kt:
+
+Open android/app/src/main/java/com/smartcardapp/MainApplication.kt and modify the getPackages() method:import com.smartcardapp.SmartCardPackage
+
+// ...
+
+override fun getPackages(): List<ReactPackage> {
+    val packages = PackageList(this).packages
+    packages.add(SmartCardPackage())
+    return packages
+}
+
+
+
+
+
+
+Step 5: Update TypeScript Code
+Modify the App.tsx file to interact with the native module.
+
+Open SmartCardApp/App.tsx and replace its content with:
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, TouchableOpacity, View, ActivityIndicator } from 'react-native';
+import LinearGradient from 'react-native-linear-gradient';
+import { NativeModules } from 'react-native';
+
+const { SmartCardModule } = NativeModules;
+
+interface CardData {
+  raw: string;
+}
+
+interface UsbDevice {
+  deviceName: string;
+  vendorId: number;
+  productId: number;
+}
+
+const App = () => {
+  const [cardData, setCardData] = useState<CardData | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [error, setError] = useState<string>('');
+
+  useEffect(() => {
+    console.log('SmartCardModule methods:', Object.keys(SmartCardModule));
+    SmartCardModule.debugModule()
+      .then((result: string) => console.log('Debug:', result))
+      .catch((e: any) => console.error('Debug error:', e));
+  }, []);
+
+  const readCard = async () => {
+    setIsLoading(true);
+    setError('');
+    try {
+      let deviceName = 'AbCircleCardTerminalUSB';
+      try {
+        const devices: UsbDevice[] = await SmartCardModule.listUsbDevices();
+        if (devices.length > 0) {
+          deviceName = devices[0].deviceName;
+          console.log('Detected device:', deviceName, devices[0].vendorId, devices[0].productId);
+        } else {
+          console.log('No smart card readers detected, using fallback device name');
+        }
+      } catch (e: any) {
+        console.error('List USB devices error:', e);
+      }
+
+      await SmartCardModule.requestUsbPermission(deviceName);
+      const response: string = await SmartCardModule.readCard('T=0');
+      setCardData({ raw: response });
+    } catch (e: any) {
+      setError(`Error: ${e.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <LinearGradient colors={['#1e3c72', '#2a5298']} style={styles.container}>
+      <View style={styles.card}>
+        <Text style={styles.title}>Smart Card Reader</Text>
+        <TouchableOpacity style={styles.button} onPress={readCard} disabled={isLoading}>
+          <Text style={styles.buttonText}>{isLoading ? 'Reading...' : 'Read Card'}</Text>
+        </TouchableOpacity>
+        {isLoading && <ActivityIndicator size="large" color="#ffffff" />}
+        {cardData && (
+          <View style={styles.dataContainer}>
+            <Text style={styles.dataText}>Card Data: {cardData.raw}</Text>
+          </View>
+        )}
+        {error && <Text style={styles.errorText}>{error}</Text>}
+      </View>
+    </LinearGradient>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  card: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 10,
+    padding: 20,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.8,
+    shadowRadius: 5,
+    elevation: 5,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    marginBottom: 20,
+  },
+  button: {
+    backgroundColor: '#00b4d8',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    marginBottom: 20,
+  },
+  buttonText: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  dataContainer: {
+    marginTop: 10,
+    alignItems: 'center',
+  },
+  dataText: {
+    color: '#ffffff',
+    fontSize: 16,
+    marginVertical: 5,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#ff4d4d',
+    fontSize: 16,
+    marginTop: 10,
+    textAlign: 'center',
+  },
+});
+
+export default App;
+
+
+Install Dependencies:
+
+Run npm install react-native-linear-gradient to add the gradient component.
+Link it (if required, depending on your React Native version): npx react-native link react-native-linear-gradient.
+
+
+
+
+Step 6: Configure ProGuard Rules
+Ensure the native module and smart card classes are preserved in release builds.
+
+Open android/app/proguard-rules.pro and add:
+# Preserve SmartCardModule and related classes
+-keep class com.smartcardapp.SmartCardModule { *; }
+-keep class android.hardware.usb.** { *; }
+-keep class javax.smartcardio.** { *; }
+-keep class sun.security.action.** { *; }
+-dontwarn sun.security.action.**
+
+
+
+
+Step 7: Build and Test
+
+Run in Debug Mode:
+
+Connect your Android device and run:npx react-native run-android
+
+
+
+
+Generate a Release APK:
+
+Configure signing in android/gradle.properties:MYAPP_RELEASE_STORE_FILE=my-release-key.keystore
+MYAPP_RELEASE_KEY_ALIAS=my-key-alias
+MYAPP_RELEASE_STORE_PASSWORD=yourpassword
+MYAPP_RELEASE_KEY_PASSWORD=yourpassword
+
+
+Update android/app/build.gradle:android {
+    ...
+    signingConfigs {
+        release {
+            storeFile file(MYAPP_RELEASE_STORE_FILE)
+            storePassword MYAPP_RELEASE_STORE_PASSWORD
+            keyAlias MYAPP_RELEASE_KEY_ALIAS
+            keyPassword MYAPP_RELEASE_KEY_PASSWORD
+        }
+    }
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+
+Build the release APK:cd android
+./gradlew assembleRelease
+
+
+
+
+Install and Test:
+
+Install the APK:adb install android/app/build/outputs/apk/release/app-release.apk
+
+
+Test with a supported USB smart card reader and a smart card inserted.
+
+
+
+
+Conclusion
+By following these steps, you’ve successfully integrated the javax.smartcardio SDK into a React Native CLI project. The app dynamically detects and supports all compatible USB smart card readers, providing a robust solution for smart card operations on Android devices.
