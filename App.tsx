@@ -1,28 +1,51 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
-
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, ActivityIndicator } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { NativeModules } from 'react-native';
 
 const { SmartCardModule } = NativeModules;
 
+interface UsbDevice {
+  deviceName: string;
+  vendorId: number;
+  productId: number;
+}
+
 const App = () => {
   const [cardData, setCardData] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>('');
 
+  // Debug available methods in SmartCardModule
+  useEffect(() => {
+    console.log('SmartCardModule methods:', Object.keys(SmartCardModule));
+    SmartCardModule.debugModule()
+      .then((result: string) => console.log('Debug:', result))
+      .catch((e: any) => console.error('Debug error:', e));
+  }, []);
+
   const readCard = async () => {
     setIsLoading(true);
     setError('');
     try {
-      // Replace 'AbCircleCardTerminalUSB' with your actual USB device name if known
-      await SmartCardModule.requestUsbPermission('AbCircleCardTerminalUSB');
+      // Try to list USB devices
+      let deviceName = 'AbCircleCardTerminalUSB'; // Fallback device name
+      try {
+        const devices: UsbDevice[] = await SmartCardModule.listUsbDevices();
+        if (devices.length > 0) {
+          deviceName = devices[0].deviceName;
+          console.log('Detected device:', deviceName, devices[0].vendorId, devices[0].productId);
+        } else {
+          console.log('No smart card readers detected, using fallback device name');
+        }
+      } catch (e: any) {
+        console.error('List USB devices error:', e);
+      }
+
+      // Request USB permission
+      await SmartCardModule.requestUsbPermission(deviceName);
+
+      // Read card data
       const response: string = await SmartCardModule.readCard('T=0');
       setCardData(`Card Data: ${response}`);
     } catch (e: any) {

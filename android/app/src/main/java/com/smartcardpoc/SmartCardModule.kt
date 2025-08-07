@@ -7,6 +7,9 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.Promise
+import com.facebook.react.bridge.WritableArray
+import com.facebook.react.bridge.WritableMap
+import com.facebook.react.bridge.Arguments
 import javax.smartcardio.*
 
 class SmartCardModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
@@ -45,14 +48,54 @@ class SmartCardModule(reactContext: ReactApplicationContext) : ReactContextBaseJ
 
     @ReactMethod
     fun requestUsbPermission(deviceName: String, promise: Promise) {
-        val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
-        val device = usbManager.deviceList.values.find { it.deviceName == deviceName }
-        if (device == null) {
-            promise.reject("NO_DEVICE", "USB device not found")
-            return
+        try {
+            val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
+            val device = usbManager.deviceList.values.find { it.deviceName == deviceName }
+            if (device == null) {
+                promise.reject("NO_DEVICE", "USB device not found")
+                return
+            }
+            usbManager.requestPermission(device, android.app.PendingIntent.getBroadcast(reactContext, 0, android.content.Intent("com.smartcardpoc.USB_PERMISSION"), 0))
+            promise.resolve("Permission requested")
+        } catch (e: Exception) {
+            promise.reject("PERMISSION_ERROR", "Failed to request USB permission: ${e.message}")
         }
-        usbManager.requestPermission(device, android.app.PendingIntent.getBroadcast(reactContext, 0, android.content.Intent("com.smartcardpoc.USB_PERMISSION"), 0))
-        promise.resolve("Permission requested")
+    }
+
+    @ReactMethod
+    fun listUsbDevices(promise: Promise) {
+        try {
+            val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
+            val deviceList = usbManager.deviceList
+            val devices: WritableArray = Arguments.createArray()
+
+            for (device in deviceList.values) {
+                // Filter for smart card readers (USB CCID class is 0x0B)
+                for (i in 0 until device.interfaceCount) {
+                    if (device.getInterface(i).interfaceClass == 0x0B) {
+                        val deviceInfo: WritableMap = Arguments.createMap()
+                        deviceInfo.putString("deviceName", device.deviceName)
+                        deviceInfo.putInt("vendorId", device.vendorId)
+                        deviceInfo.putInt("productId", device.productId)
+                        devices.pushMap(deviceInfo)
+                        break
+                    }
+                }
+            }
+
+            if (devices.size() == 0) {
+                promise.reject("NO_DEVICES", "No smart card readers found")
+                return
+            }
+            promise.resolve(devices)
+        } catch (e: Exception) {
+            promise.reject("LIST_ERROR", "Failed to list USB devices: ${e.message}")
+        }
+    }
+
+    @ReactMethod
+    fun debugModule(promise: Promise) {
+        promise.resolve("SmartCardModule is loaded")
     }
 
     private fun byteArrayToHex(bytes: ByteArray): String {
