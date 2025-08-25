@@ -1,8 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- REMOVE this line: android.permission.USB_PERMISSION does not exist and is ignored by Android -->
-    <!-- <uses-permission android:name="android.permission.USB_PERMISSION" /> -->
     <uses-feature android:name="android.hardware.usb.host" android:required="true" />
 
     <application
@@ -24,20 +22,12 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
-        <!-- Keep this for handling USB attach/detach events if needed, but we'll use a BroadcastReceiver for permission results -->
         <intent-filter>
             <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            <action android:name="android.hardware.usb.action.USB_DEVICE_DETACHED" />
         </intent-filter>
-        <!-- Optional: Meta-data for auto-detecting your USB device (replace with your device's vendor/product ID) -->
         <meta-data android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
-                   android:resource="@xml/device_filter" />
+                   android:resource="@xml/usb_device_filter" />
       </activity>
-
-      <!-- Add a BroadcastReceiver to handle the permission result intent -->
-      <receiver android:name=".UsbPermissionReceiver" android:exported="false">
-        <intent-filter>
-          <action android:name="com.smartcardpoc.USB_PERMISSION" />
-        </intent-filter>
-      </receiver>
     </application>
 </manifest>

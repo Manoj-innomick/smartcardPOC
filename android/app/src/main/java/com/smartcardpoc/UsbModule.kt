@@ -47,21 +47,29 @@ class UsbModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
 
-        // Updated registration with Android 14+ compatibility
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {  // API 34+
-            reactContext.registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            reactContext.registerReceiver(usbReceiver, filter)
-        }
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) Context.RECEIVER_NOT_EXPORTED else 0
+        reactContext.registerReceiver(usbReceiver, filter, flags)
     }
 
     override fun getName(): String = "UsbModule"
 
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun hasUsbHost(): Boolean {
+        return reactApplicationContext.packageManager.hasSystemFeature("android.hardware.usb.host") &&
+               usbManager != null
+    }
+
     @ReactMethod
     fun checkAndRequestPermission() {
         val deviceList = usbManager.deviceList
+        if (deviceList.isEmpty()) {
+            Log.d(TAG, "No USB devices found")
+            return
+        }
         for (device in deviceList.values) {
-            requestUsbPermission(device)
+            if (device.vendorId == 0x31aa) {  // AB Circle VID
+                requestUsbPermission(device)
+            }
         }
     }
 

@@ -7,23 +7,14 @@ import {
   TextInput,
   Alert,
   FlatList,
-  ScrollView,
+  Picker,
+  CheckBox,
   TouchableOpacity,
+  BackHandler,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
 import { NativeModules, NativeEventEmitter, Platform } from 'react-native';
-
-// Fallback for Picker/CheckBox if they cause issues (using Text for now, can revert to Picker later)
-const CustomPicker = ({ selectedValue, onValueChange, children, enabled }: any) => (
-  <TouchableOpacity onPress={() => enabled && Alert.alert('Select Terminal', children.map((c: any) => c.props.label).join('\n'))}>
-    <Text>{selectedValue || 'Select Terminal'}</Text>
-  </TouchableOpacity>
-);
-const CustomCheckBox = ({ value, onValueChange, disabled }: any) => (
-  <TouchableOpacity onPress={() => !disabled && onValueChange(!value)}>
-    <Text>{value ? '✓' : '✗'}</Text>
-  </TouchableOpacity>
-);
 
 const { SmartCardModule, UsbModule } = NativeModules;
 const smartCardEmitter = new NativeEventEmitter(SmartCardModule);
@@ -47,12 +38,10 @@ const App = () => {
   const [usbStatus, setUsbStatus] = useState('Checking USB...');
 
   useEffect(() => {
-    console.log('App mounted, Platform:', Platform.OS);
     if (Platform.OS !== 'android') return;
 
     const checkUsbHost = async () => {
       const hasSupport = await UsbModule.hasUsbHost();
-      console.log('USB Host support:', hasSupport);
       if (!hasSupport) {
         Alert.alert('Error', 'USB Host not supported on this device.');
         BackHandler.exitApp();
@@ -66,7 +55,6 @@ const App = () => {
 
     const terminalsSub = smartCardEmitter.addListener('TerminalsUpdated', refreshTerminals);
     const cardEventSub = smartCardEmitter.addListener('CardEvent', (event) => {
-      console.log('Card event:', event);
       if (event.type === 'inserted') {
         addLog(`Card Inserted ${event.terminal} ATR: ${event.atr}`);
       } else if (event.type === 'removed') {
@@ -75,7 +63,6 @@ const App = () => {
     });
 
     const permissionSub = usbEmitter.addListener('UsbPermissionResult', (event) => {
-      console.log('USB Permission:', event);
       setUsbStatus(`USB Permission: ${event.granted ? 'Granted' : 'Denied'} for ${event.deviceName}`);
       if (event.granted) {
         addLog('USB permission granted.');
@@ -105,29 +92,24 @@ const App = () => {
       permissionSub.remove();
       attachedSub.remove();
       detachedSub.remove();
-      console.log('App unmounted');
     };
   }, []);
 
   const refreshTerminals = async () => {
     try {
-      console.log('Refreshing terminals');
       const names = await SmartCardModule.listTerminals();
-      console.log('Terminals:', names);
       setTerminals(names);
       if (names.length > 0 && !selectedTerminal) {
         setSelectedTerminal(names[0]);
         addLog(`Terminal Selected: ${names[0]}`);
       }
     } catch (e) {
-      console.log('Terminal refresh error:', e);
       addLog(`Error refreshing terminals: ${e.message}`);
     }
   };
 
   const handleConnect = async () => {
     setIsLoading(true);
-    console.log('Connect action, connected:', connected);
     if (connected) {
       try {
         await SmartCardModule.disconnect();
@@ -135,7 +117,6 @@ const App = () => {
         setIsDirectMode(false);
         addLog('Disconnected');
       } catch (e) {
-        console.log('Disconnect error:', e);
         addLog(`Disconnect error: ${e.message}`);
       }
     } else {
@@ -156,15 +137,12 @@ const App = () => {
         protocol = t0 && t1 ? '*' : t0 ? 'T=0' : 'T=1';
       }
       try {
-        console.log('Selecting terminal:', selectedTerminal);
         await SmartCardModule.selectTerminal(selectedTerminal);
-        console.log('Connecting with protocol:', protocol);
         await SmartCardModule.connect(protocol);
         setConnected(true);
         setIsDirectMode(protocol === 'direct');
         addLog(`Connected with protocol: ${protocol}`);
       } catch (e) {
-        console.log('Connect error:', e);
         addLog(`Connect error: ${e.message}`);
       }
     }
@@ -173,12 +151,10 @@ const App = () => {
 
   const handleTransmitAPDU = async () => {
     try {
-      console.log('Transmitting APDU:', apduCommand);
       const response = await SmartCardModule.transmitAPDU(apduCommand);
       addLog(`CommandAPDU: ${apduCommand.replace(/ /g, '')}`);
       addLog(`ResponseAPDU: ${response}`);
     } catch (e) {
-      console.log('APDU error:', e);
       setConnected(false);
       setIsDirectMode(false);
       addLog(`APDU error: ${e.message}`);
@@ -187,12 +163,10 @@ const App = () => {
 
   const handleTransmitControl = async () => {
     try {
-      console.log('Transmitting Control:', controlCommand);
       const response = await SmartCardModule.transmitControl(controlCommand);
       addLog(`EscapeCommand: ${controlCommand.replace(/ /g, '')}`);
       addLog(`EscapeResponse: ${response}`);
     } catch (e) {
-      console.log('Control error:', e);
       setConnected(false);
       setIsDirectMode(false);
       addLog(`Control error: ${e.message}`);
@@ -201,11 +175,9 @@ const App = () => {
 
   const handleGetFirmware = async () => {
     try {
-      console.log('Getting firmware for:', selectedTerminal);
       const version = await SmartCardModule.getFirmware();
       addLog(`Firmware: ${version}`);
     } catch (e) {
-      console.log('Firmware error:', e);
       addLog(`Firmware error: ${e.message}`);
     }
   };
@@ -214,7 +186,6 @@ const App = () => {
     const newMonitoring = !monitoring;
     setMonitoring(newMonitoring);
     try {
-      console.log('Toggling monitoring:', newMonitoring);
       if (newMonitoring) {
         await SmartCardModule.startMonitorCard();
         addLog('Card Monitoring ON');
@@ -223,7 +194,6 @@ const App = () => {
         addLog('Card Monitoring OFF');
       }
     } catch (e) {
-      console.log('Monitoring error:', e);
       addLog(`Monitoring error: ${e.message}`);
     }
   };
@@ -244,18 +214,15 @@ const App = () => {
 
       <View style={styles.row}>
         <Text style={styles.label}>Terminal:</Text>
-        <CustomPicker
+        <Picker
           selectedValue={selectedTerminal}
-          onValueChange={(itemValue: string) => {
-            setSelectedTerminal(itemValue);
-            addLog(`Terminal Selected: ${itemValue}`);
-          }}
+          style={styles.picker}
           enabled={!connected}
-        >
+          onValueChange={(itemValue) => setSelectedTerminal(itemValue)}>
           {terminals.map((name) => (
             <Picker.Item key={name} label={name} value={name} />
           ))}
-        </CustomPicker>
+        </Picker>
         <Button title="Refresh" onPress={refreshTerminals} disabled={connected} />
       </View>
 
@@ -272,9 +239,9 @@ const App = () => {
       {mode === 'exclusive' && (
         <View style={styles.row}>
           <Text style={styles.label}>Protocol:</Text>
-          <CustomCheckBox value={t0} onValueChange={setT0} disabled={connected} />
+          <CheckBox value={t0} onValueChange={setT0} disabled={connected} />
           <Text>T=0</Text>
-          <CustomCheckBox value={t1} onValueChange={setT1} disabled={connected} />
+          <CheckBox value={t1} onValueChange={setT1} disabled={connected} />
           <Text>T=1</Text>
         </View>
       )}

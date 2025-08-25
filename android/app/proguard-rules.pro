@@ -1,5 +1,6 @@
--keep class com.smartcardpoc.SmartCardModule { *; }
+-keep class com.smartcardpoc.** { *; }
 -keep class android.hardware.usb.** { *; }
 -keep class javax.smartcardio.** { *; }
+-keep class com.abc.** { *; }
 -dontwarn sun.security.action.**
 -keep class sun.security.action.** { *; }

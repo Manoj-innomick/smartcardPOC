@@ -1,110 +1,257 @@
 package com.smartcardpoc
 
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.hardware.usb.UsbDevice
-import android.hardware.usb.UsbManager
-import com.facebook.react.bridge.ReactApplicationContext
-import com.facebook.react.bridge.ReactContextBaseJavaModule
-import com.facebook.react.bridge.ReactMethod
-import com.facebook.react.bridge.Promise
-import com.facebook.react.bridge.WritableArray
-import com.facebook.react.bridge.WritableMap
-import com.facebook.react.bridge.Arguments
+import com.abc.terminalfactory.UsbSmartCard
+import com.abc.terminalfactory.AbCircleCardTerminalUSB
+import com.facebook.react.bridge.*
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import javax.smartcardio.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import java.util.ArrayList
 
 class SmartCardModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
-    private val reactContext: ReactApplicationContext = reactContext
 
-    override fun getName(): String {
-        return "SmartCardModule"
+    private var currentTerminal: CardTerminal? = null
+    private var card: Card? = null
+    private var channel: CardChannel? = null
+    private var terminalsThread: Thread? = null
+    private var cardMonitorThread: Thread? = null
+
+    init {
+        // Delay thread start until explicitly requested
+        android.util.Log.e("SmartCardModule", "Init complete")
+    }
+
+    override fun getName(): String = "SmartCardModule"
+
+    private fun startAutoRefreshThread() {
+        if (terminalsThread?.isAlive == true) return
+        terminalsThread = Thread {
+            var oldTerminals: List<CardTerminal>? = null
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    val terminals = UsbSmartCard.terminals()
+                    val currentTerminals = terminals.list()
+                    if (oldTerminals == null || !oldTerminals.equals(currentTerminals)) {
+                        oldTerminals = currentTerminals
+                        sendEvent("TerminalsUpdated", null)
+                    }
+                    Thread.sleep(500)
+                } catch (e: Exception) {
+                    android.util.Log.e("SmartCardModule", "AutoRefresh error: ${e.message}")
+                }
+            }
+        }
+        terminalsThread?.start()
     }
 
     @ReactMethod
-    fun readCard(protocol: String, promise: Promise) {
+    fun listTerminals(promise: Promise) {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val factory = TerminalFactory.getDefault()
-                val terminals = factory.terminals()
-                val terminalList = terminals.list()
-                if (terminalList.isEmpty()) {
-                    promise.reject("NO_TERMINALS", "No card terminals found")
-                    return@launch
+                startAutoRefreshThread()
+                val terminals = UsbSmartCard.terminals().list()
+                val names = Arguments.createArray()
+                for (terminal in terminals) {
+                    names.pushString(terminal.name)
                 }
-                val terminal = terminalList[0]
-                if (!terminal.isCardPresent) {
-                    promise.reject("NO_CARD", "No card present in the terminal")
-                    return@launch
-                }
-                val card = terminal.connect(protocol)
-                val channel = card.basicChannel
-                val selectCommand = byteArrayOf(0x00, 0xA4.toByte(), 0x04, 0x00, 0x00)
-                val command = CommandAPDU(selectCommand)
-                val response = channel.transmit(command)
-                promise.resolve(byteArrayToHex(response.bytes))
-                card.disconnect(true)
-            } catch (e: Exception) {
-                promise.reject("CARD_ERROR", e.message)
+                promise.resolve(names)
+            } catch (e: CardException) {
+                promise.reject("LIST_ERROR", e.message)
             }
         }
     }
 
     @ReactMethod
-    fun requestUsbPermission(deviceName: String, promise: Promise) {
-        val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
-        val device = usbManager.deviceList.values.find { it.deviceName == deviceName }
-        if (device == null) {
-            promise.reject("NO_DEVICE", "USB device not found")
+    fun selectTerminal(name: String, promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val terminals = UsbSmartCard.terminals().list()
+                currentTerminal = terminals.find { it.name == name }
+                if (currentTerminal == null) {
+                    promise.reject("NO_TERMINAL", "Terminal not found: $name")
+                } else {
+                    promise.resolve(true)
+                }
+            } catch (e: CardException) {
+                promise.reject("SELECT_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun connect(protocol: String, promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                if (currentTerminal == null) {
+                    promise.reject("NO_TERMINAL", "No terminal selected")
+                    return@launch
+                }
+                card = currentTerminal!!.connect(protocol)
+                channel = card!!.basicChannel
+                promise.resolve(Util.bytesToHexString(card!!.atr.bytes))
+            } catch (e: CardException) {
+                card = null
+                channel = null
+                promise.reject("CONNECT_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun disconnect(promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                card?.disconnect(true)
+                card = null
+                channel = null
+                stopMonitorCardInternally()
+                promise.resolve(true)
+            } catch (e: CardException) {
+                promise.reject("DISCONNECT_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun transmitAPDU(commandStr: String, promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                if (channel == null) {
+                    promise.reject("NO_CHANNEL", "Not connected")
+                    return@launch
+                }
+                val command = CommandAPDU(Util.stringToBytes(commandStr))
+                val response = channel!!.transmit(command)
+                promise.resolve(Util.bytesToHexString(response.bytes))
+            } catch (e: CardException) {
+                disconnectInternally()
+                promise.reject("APDU_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun transmitControl(commandStr: String, promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                if (card == null) {
+                    promise.reject("NO_CARD", "Not connected")
+                    return@launch
+                }
+                val command = Util.stringToBytes(commandStr)
+                val response = card!!.transmitControlCommand(3500, command)
+                promise.resolve(Util.bytesToHexString(response))
+            } catch (e: CardException) {
+                disconnectInternally()
+                promise.reject("CONTROL_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun getFirmware(promise: Promise) {
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                if (currentTerminal == null) {
+                    promise.reject("NO_TERMINAL", "No terminal selected")
+                    return@launch
+                }
+                if (currentTerminal !is AbCircleCardTerminalUSB) {
+                    promise.reject("INVALID_TERMINAL", "Not an AB Circle USB terminal")
+                    return@launch
+                }
+                val version = (currentTerminal as AbCircleCardTerminalUSB).firmwareVersion
+                promise.resolve(version)
+            } catch (e: Exception) {
+                promise.reject("FIRMWARE_ERROR", e.message)
+            }
+        }
+    }
+
+    @ReactMethod
+    fun startMonitorCard(promise: Promise) {
+        if (cardMonitorThread?.isAlive == true) {
+            promise.resolve(false)
             return
         }
-        val intent = Intent("com.smartcardpoc.USB_PERMISSION")
-        val pendingIntent = PendingIntent.getBroadcast(reactContext, 0, intent, PendingIntent.FLAG_IMMUTABLE)
-        usbManager.requestPermission(device, pendingIntent)
-        promise.resolve("Permission requested")
+        cardMonitorThread = Thread {
+            while (!Thread.currentThread().isInterrupted) {
+                try {
+                    val terminals = UsbSmartCard.terminals()
+                    terminals.waitForChange(1000)
+                    val inserted = terminals.list(CardTerminals.State.CARD_INSERTION)
+                    for (terminal in inserted) {
+                        val cardTemp = terminal.connect("*")
+                        val atr = Util.bytesToHexString(cardTemp.atr.bytes)
+                        cardTemp.disconnect(true)
+                        val params = Arguments.createMap()
+                        params.putString("type", "inserted")
+                        params.putString("terminal", terminal.name)
+                        params.putString("atr", atr)
+                        sendEvent("CardEvent", params)
+                    }
+                    val removed = terminals.list(CardTerminals.State.CARD_REMOVAL)
+                    for (terminal in removed) {
+                        val params = Arguments.createMap()
+                        params.putString("type", "removed")
+                        params.putString("terminal", terminal.name)
+                        sendEvent("CardEvent", params)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("SmartCardModule", "Monitor error: ${e.message}")
+                }
+            }
+        }
+        cardMonitorThread?.start()
+        promise.resolve(true)
     }
 
     @ReactMethod
-    fun listUsbDevices(promise: Promise) {
+    fun stopMonitorCard(promise: Promise) {
+        stopMonitorCardInternally()
+        promise.resolve(true)
+    }
+
+    private fun stopMonitorCardInternally() {
+        cardMonitorThread?.interrupt()
+        cardMonitorThread = null
+    }
+
+    private fun disconnectInternally() {
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val usbManager = reactContext.getSystemService(Context.USB_SERVICE) as UsbManager
-                val deviceList = usbManager.deviceList
-                val devices: WritableArray = Arguments.createArray()
-
-                for (device in deviceList.values) {
-                    for (i in 0 until device.interfaceCount) {
-                        if (device.getInterface(i).interfaceClass == 0x0B) {
-                            val deviceInfo: WritableMap = Arguments.createMap()
-                            deviceInfo.putString("deviceName", device.deviceName)
-                            deviceInfo.putInt("vendorId", device.vendorId)
-                            deviceInfo.putInt("productId", device.productId)
-                            devices.pushMap(deviceInfo)
-                            break
-                        }
-                    }
-                }
-
-                if (devices.size() == 0) {
-                    promise.reject("NO_DEVICES", "No smart card readers found")
-                    return@launch
-                }
-                promise.resolve(devices)
-            } catch (e: Exception) {
-                promise.reject("LIST_ERROR", "Failed to list USB devices: ${e.message}")
+                card?.disconnect(true)
+                card = null
+                channel = null
+                stopMonitorCardInternally()
+            } catch (e: CardException) {
+                android.util.Log.e("SmartCardModule", "Internal disconnect error: ${e.message}")
             }
         }
     }
 
-    @ReactMethod
-    fun debugModule(promise: Promise) {
-        promise.resolve("SmartCardModule is loaded")
+    private fun sendEvent(eventName: String, params: WritableMap?) {
+        try {
+            reactApplicationContext
+                .getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                ?.emit(eventName, params)
+        } catch (e: Exception) {
+            android.util.Log.e("SmartCardModule", "Event emission failed: ${e.message}")
+        }
     }
 
-    private fun byteArrayToHex(bytes: ByteArray): String {
-        return bytes.joinToString("") { String.format("%02X", it) }
+    override fun onCatalystInstanceDestroy() {
+        terminalsThread?.interrupt()
+        cardMonitorThread?.interrupt()
+        try {
+            card?.disconnect(true)
+        } catch (e: Exception) {
+            android.util.Log.e("SmartCardModule", "Cleanup error: ${e.message}")
+        }
+        terminalsThread = null
+        cardMonitorThread = null
     }
 }
